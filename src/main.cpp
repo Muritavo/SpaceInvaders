@@ -10,23 +10,24 @@ using namespace std;
 #include <vector>
 #include <time.h>
 
-const int
+const byte
 	KEY_UP = 0,
 	KEY_DOWN = 1,
 	KEY_LEFT = 2,
-	KEY_RIGHT = 3;
+	KEY_RIGHT = 3,
+	KEY_SHIFT = 4;
 const int
 	CIRCLE_EDGES = 6,				   //Number of edges for the circle drawn for the projectile
 	BEZIER_SECTIONS = 10,			   //Número de seções da curva para estimar a distância percorrida
 	MAX_PROJECTILES = 100,			   //Número maximo de projéteis
-	WIDTH = 200,					   //Largura do espaço
-	HEIGHT = 200,					   //Altura do espaço
+	WIDTH = 500,					   //Largura do espaço
+	HEIGHT = 500,					   //Altura do espaço
 	SHIP_SPEED = 40,				   //Velocidade da nave/s
-	SHIP_ROTATION = 360,			   //Graus de rotação/s
+	SHIP_ROTATION = 180,			   //Graus de rotação/s
 	PROJECTILE_SPEED = SHIP_SPEED * 2, //Velocidade da nave/s
 	INTERVAL_BETWEEN_ENEMY_SHOTS = 5;  //Intervalo em segundos entre os tiros dos inimigos
 
-bool activeKeys[4] = {false};
+bool activeKeys[5] = {false};
 
 struct Projectile
 {
@@ -200,9 +201,8 @@ void loadGameModel()
 						lastColorIndex = nextColorIndex;
 					}
 				}
-
 				index++;
-			} while (!line.empty() && !file.eof());
+			} while (file.peek() != EOF);
 		}
 	}
 }
@@ -332,10 +332,10 @@ void updateEnemiesPosition()
 			//Estima a distância a ser percorrida
 			float distance = 0;
 			GLfloat prevPoint[] = {*(s->position + 0), *(s->position + 1)};
-			GLfloat to[] = {*(s->to + 0), *(s->to + 1)};
-			GLfloat intermediate[] = {*(s->intermediate + 0), *(s->intermediate + 1)};
 			for (int si = 0; si < BEZIER_SECTIONS; si++)
 			{
+				GLfloat to[] = {*(s->to + 0), *(s->to + 1)};
+				GLfloat intermediate[] = {*(s->intermediate + 0), *(s->intermediate + 1)};
 				GLfloat nextPoint[] = {*(s->from + 0), *(s->from + 1)};
 				bezier(normalize(si, BEZIER_SECTIONS - 1, 0), nextPoint, intermediate, to, 2);
 				distance += sqrt(pow(nextPoint[0] - prevPoint[0], 2) + pow(nextPoint[1] - prevPoint[1], 2));
@@ -370,10 +370,10 @@ void shotProjectile(ShipInstance *s)
 {
 	s->projectilePointer[s->lastProjectileIndex] = &s->projectile[s->lastProjectileIndex];
 	Projectile *pointer = s->projectilePointer[s->lastProjectileIndex];
-	pointer->position[0] = s->position[0];
-	pointer->position[1] = s->position[1];
 	pointer->directionVector[0] = PROJECTILE_SPEED * -sin(s->rotation * 3.14f / 180.0f);
 	pointer->directionVector[1] = PROJECTILE_SPEED * cos(s->rotation * 3.14f / 180.0f);
+	pointer->position[0] = s->position[0] + (s->model.columns / 2);
+	pointer->position[1] = s->position[1] + (s->model.lines / 2);
 	pointer->size = s->model.columns / 2;
 	s->lastProjectileIndex++;
 	if (s->lastProjectileIndex == MAX_PROJECTILES)
@@ -385,9 +385,10 @@ void updatePlayerState()
 	if (activeKeys[KEY_UP] || activeKeys[KEY_DOWN])
 	{
 		int direct = (activeKeys[KEY_UP]) ? 1.0f : -1.0f;
+		int speed = activeKeys[KEY_SHIFT] ? SHIP_SPEED * 1.5f : SHIP_SPEED;
 		GLfloat newPosition[2];
-		newPosition[0] = instances[0].position[0] + (SHIP_SPEED * elapsedSeconds) * -sin(instances[0].rotation * 3.14f / 180.0f) * direct;
-		newPosition[1] = instances[0].position[1] + (SHIP_SPEED * elapsedSeconds) * cos(instances[0].rotation * 3.14f / 180.0f) * direct;
+		newPosition[0] = instances[0].position[0] + (speed * elapsedSeconds) * -sin(instances[0].rotation * 3.14f / 180.0f) * direct;
+		newPosition[1] = instances[0].position[1] + (speed * elapsedSeconds) * cos(instances[0].rotation * 3.14f / 180.0f) * direct;
 		if (newPosition[0] > 0 && newPosition[0] < WIDTH)
 			instances[0].position[0] = newPosition[0];
 		else
@@ -409,13 +410,14 @@ void updateEnemiesState()
 {
 	for (int ii = 1; ii < instances.size(); ii++)
 	{
-		if (rand() % 100 == 1)
+		if (rand() % 200 == 1)
 			shotProjectile(&instances[ii]);
 	}
 }
 
 void keyboard(unsigned char key, bool toogleActive)
 {
+	activeKeys[KEY_SHIFT] = glutGetModifiers() & GLUT_ACTIVE_SHIFT ? true : false;
 	switch (key)
 	{
 	case 27:	 // Termina o programa qdo
@@ -428,7 +430,7 @@ void keyboard(unsigned char key, bool toogleActive)
 		activeKeys[KEY_DOWN] = toogleActive;
 		break;
 	case GLUT_KEY_RIGHT:
-		activeKeys[KEY_RIGHT] = toogleActive;		
+		activeKeys[KEY_RIGHT] = toogleActive;
 		break;
 	case GLUT_KEY_LEFT:
 		activeKeys[KEY_LEFT] = toogleActive;
@@ -437,18 +439,22 @@ void keyboard(unsigned char key, bool toogleActive)
 		break;
 	}
 }
-void keyboardDown(unsigned char key, int x, int y) {
+void keyboardDown(unsigned char key, int x, int y)
+{
 	if (key == ' ')
 		shotProjectile(&instances[0]);
 	keyboard(key, true);
 }
-void keyboardUp(unsigned char key, int x, int y) {
+void keyboardUp(unsigned char key, int x, int y)
+{
 	keyboard(key, false);
 }
-void specialDown(int key, int x, int y) {
+void specialDown(int key, int x, int y)
+{
 	keyboard(key, true);
 }
-void specialUp(int key, int x, int y) {
+void specialUp(int key, int x, int y)
+{
 	keyboard(key, false);
 }
 
