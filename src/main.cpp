@@ -5,20 +5,28 @@ using namespace std;
 
 #include <windows.h>
 #include <GL/glut.h>
+#include <math.h>
 #include <fstream>
 #include <vector>
 #include <time.h>
-#include <math.h>
 
 const int
-	BEZIER_SECTIONS = 10,			  //Número de seções da curva para estimar a distância percorrida
-	MAX_PROJECTILES = 100,			  //Número maximo de projéteis
-	WIDTH = 200,					  //Largura do espaço
-	HEIGHT = 200,					  //Altura do espaço
-	SHIP_SPEED = 200,				  //Velocidade da nave/s
-	SHIP_ROTATION = 360,				  //Graus de rotação/s
-	PROJECTILE_SPEED = SHIP_SPEED * 2,			  //Velocidade da nave/s
-	INTERVAL_BETWEEN_ENEMY_SHOTS = 5; //Intervalo em segundos entre os tiros dos inimigos
+	KEY_UP = 0,
+	KEY_DOWN = 1,
+	KEY_LEFT = 2,
+	KEY_RIGHT = 3;
+const int
+	CIRCLE_EDGES = 6,				   //Number of edges for the circle drawn for the projectile
+	BEZIER_SECTIONS = 10,			   //Número de seções da curva para estimar a distância percorrida
+	MAX_PROJECTILES = 100,			   //Número maximo de projéteis
+	WIDTH = 200,					   //Largura do espaço
+	HEIGHT = 200,					   //Altura do espaço
+	SHIP_SPEED = 40,				   //Velocidade da nave/s
+	SHIP_ROTATION = 360,			   //Graus de rotação/s
+	PROJECTILE_SPEED = SHIP_SPEED * 2, //Velocidade da nave/s
+	INTERVAL_BETWEEN_ENEMY_SHOTS = 5;  //Intervalo em segundos entre os tiros dos inimigos
+
+bool activeKeys[4] = {false};
 
 struct Projectile
 {
@@ -151,21 +159,19 @@ void loadGameModel()
 				indexOfLine = line.find(" ", indexOfLine) + 1;
 				colors[index] = normalize(stoi(line.substr(indexOfLine, line.find(" ", indexOfLine) - indexOfLine)), 255, 0);
 				indexOfLine = line.find(" ", indexOfLine) + 1;
-				index++;
 				colors[index + 1] = normalize(stof(line.substr(indexOfLine, line.find(" ", indexOfLine) - indexOfLine)), 255, 0);
 				indexOfLine = line.find(" ", indexOfLine) + 1;
-				index++;
 				colors[index + 2] = normalize(stoi(line.substr(indexOfLine, line.find(" ", indexOfLine) - indexOfLine)), 255, 0);
 				indexOfLine = line.find(" ", indexOfLine) + 1;
-				index++;
 				colors[index + 3] = index == 0 ? 0.0f : 1.0f; //A primeira cor sempre é transparente
-				index++;
+
+				printf("Generated color %f, %f, %f, %f\n", colors[index], colors[index + 1], colors[index + 2], colors[index + 3]);
+				index += 4;
 				getline(file, line);
 			} while (!line.empty());
 		}
 		if (line.find("#OBJETO") != string::npos)
 		{
-			printf("Preparando modelos de objetos\n");
 			index = 0;
 			do
 			{
@@ -182,21 +188,12 @@ void loadGameModel()
 				//Variavel auxiliar para separas as cores da linha
 				int lastColorIndex = 0;
 				//Itera por todas as linhas
-				printf(
-					"Preparando um modelo com %d linhas e %d colunas\n",
-					models[index].lines,
-					models[index].columns);
 				for (int lineIndex = 0; lineIndex < models[index].lines; lineIndex++)
 				{
 					getline(file, line);
 					lastColorIndex = 0;
 					for (int columnIndex = 0; columnIndex < models[index].columns; columnIndex++)
 					{
-						printf(
-							"Lendo a coluna %d da linha %d do modelo %d\n",
-							columnIndex,
-							lineIndex,
-							index);
 						int nextColorIndex = line.find(" ", lastColorIndex) + 1;
 						int colorsIndex = lineIndex * models[index].columns + columnIndex;
 						models[index].colors[colorsIndex] = stoi(line.substr(lastColorIndex, nextColorIndex - lastColorIndex));
@@ -243,7 +240,7 @@ void init(void)
 	}
 
 	glDisable(GL_DEPTH_TEST);
-	glClearColor(0.0f, 0.0f, 0.0f, 1.0f); // Fundo de tela preto
+	glClearColor(0.1f, 0.1f, 0.1f, 1.0f); // Fundo de tela preto
 }
 
 void drawProjectile(Projectile p)
@@ -251,16 +248,14 @@ void drawProjectile(Projectile p)
 	glPushMatrix();
 	glTranslatef(p.position[0], p.position[1], 0);
 	glTranslatef(-p.size / 2, -p.size / 2, 0);
-	glBegin(GL_QUADS);
+	glBegin(GL_POLYGON);
 	glColor4f(
 		1,
 		1,
 		1,
 		1);
-	glVertex2f(0, p.size);
-	glVertex2f(p.size, p.size);
-	glVertex2f(p.size, 0);
-	glVertex2f(0, 0);
+	for (int a = 0; a < 360; a += 360 / CIRCLE_EDGES)
+		glVertex2f(cos((a * M_PI / 180.0f) * p.size), sin((a * M_PI / 180.0f) * p.size));
 	glEnd();
 	glPopMatrix();
 }
@@ -276,7 +271,7 @@ void drawShip(ShipInstance s)
 	{
 		for (int ci = 0; ci < s.model.columns; ci++)
 		{
-			int colorIndex = s.model.colors[(s.model.lines - 1 - li) * s.model.columns + ci];
+			int colorIndex = ((s.model.colors[(s.model.lines - 1 - li) * s.model.columns + ci] - 1) * 4);
 			glColor4f(
 				colors[colorIndex],
 				colors[colorIndex + 1],
@@ -378,54 +373,19 @@ void shotProjectile(ShipInstance *s)
 	pointer->position[0] = s->position[0];
 	pointer->position[1] = s->position[1];
 	pointer->directionVector[0] = PROJECTILE_SPEED * -sin(s->rotation * 3.14f / 180.0f);
- 	pointer->directionVector[1] = PROJECTILE_SPEED * cos(s->rotation * 3.14f / 180.0f);
-	pointer->size = 1;
+	pointer->directionVector[1] = PROJECTILE_SPEED * cos(s->rotation * 3.14f / 180.0f);
+	pointer->size = s->model.columns / 2;
 	s->lastProjectileIndex++;
 	if (s->lastProjectileIndex == MAX_PROJECTILES)
 		s->lastProjectileIndex = 0;
 }
 
-void updateEnemiesState() {
-	for (int ii = 1; ii < instances.size(); ii++)
-	{
-		shotProjectile(&instances[ii]);
-	}
-}
-
-// **********************************************************************
-//  void keyboard ( unsigned char key, int x, int y )
-//
-//
-// **********************************************************************
-void keyboard(unsigned char key, int x, int y)
+void updatePlayerState()
 {
-	switch (key)
+	if (activeKeys[KEY_UP] || activeKeys[KEY_DOWN])
 	{
-	case 27:	 // Termina o programa qdo
-		exit(0); // a tecla ESC for pressionada
-		break;
-	case ' ':
-		shotProjectile(&instances[0]);
-		break;
-	default:
-		break;
-	}
-}
-
-// **********************************************************************
-//  void arrow_keys ( int a_keys, int x, int y )
-//
-//
-// **********************************************************************
-
-void arrow_keys(int a_keys, int x, int y)
-{
-	int direct = (GLUT_KEY_UP == a_keys) ? 1.0f : -1.0f;
-	GLfloat newPosition[2];
-	switch (a_keys)
-	{
-	case GLUT_KEY_UP: // When Up Arrow Is Pressed...
-	case GLUT_KEY_DOWN:
+		int direct = (activeKeys[KEY_UP]) ? 1.0f : -1.0f;
+		GLfloat newPosition[2];
 		newPosition[0] = instances[0].position[0] + (SHIP_SPEED * elapsedSeconds) * -sin(instances[0].rotation * 3.14f / 180.0f) * direct;
 		newPosition[1] = instances[0].position[1] + (SHIP_SPEED * elapsedSeconds) * cos(instances[0].rotation * 3.14f / 180.0f) * direct;
 		if (newPosition[0] > 0 && newPosition[0] < WIDTH)
@@ -437,17 +397,59 @@ void arrow_keys(int a_keys, int x, int y)
 			instances[0].position[1] = newPosition[1];
 		else
 			instances[0].position[1] = newPosition[1] > 0 ? HEIGHT : 0;
+	}
+	if (activeKeys[KEY_LEFT] || activeKeys[KEY_RIGHT])
+	{
+		int direct = (activeKeys[KEY_LEFT]) ? 1.0f : -1.0f;
+		instances[0].rotation += SHIP_ROTATION * elapsedSeconds * direct;
+	}
+}
 
+void updateEnemiesState()
+{
+	for (int ii = 1; ii < instances.size(); ii++)
+	{
+		if (rand() % 100 == 1)
+			shotProjectile(&instances[ii]);
+	}
+}
+
+void keyboard(unsigned char key, bool toogleActive)
+{
+	switch (key)
+	{
+	case 27:	 // Termina o programa qdo
+		exit(0); // a tecla ESC for pressionada
+		break;
+	case GLUT_KEY_UP:
+		activeKeys[KEY_UP] = toogleActive;
+		break;
+	case GLUT_KEY_DOWN:
+		activeKeys[KEY_DOWN] = toogleActive;
 		break;
 	case GLUT_KEY_RIGHT:
-		instances[0].rotation -= SHIP_ROTATION * elapsedSeconds;
+		activeKeys[KEY_RIGHT] = toogleActive;		
 		break;
 	case GLUT_KEY_LEFT:
-		instances[0].rotation += SHIP_ROTATION * elapsedSeconds;
+		activeKeys[KEY_LEFT] = toogleActive;
 		break;
 	default:
 		break;
 	}
+}
+void keyboardDown(unsigned char key, int x, int y) {
+	if (key == ' ')
+		shotProjectile(&instances[0]);
+	keyboard(key, true);
+}
+void keyboardUp(unsigned char key, int x, int y) {
+	keyboard(key, false);
+}
+void specialDown(int key, int x, int y) {
+	keyboard(key, true);
+}
+void specialUp(int key, int x, int y) {
+	keyboard(key, false);
 }
 
 // **********************************************************************
@@ -460,6 +462,7 @@ void display(void)
 	updateProjectilesPosition();
 	updateEnemiesPosition();
 	updateEnemiesState();
+	updatePlayerState();
 	glClear(GL_COLOR_BUFFER_BIT);
 	//Define os limites
 	glMatrixMode(GL_MODELVIEW);
@@ -495,8 +498,10 @@ int main(int argc, char **argv)
 	init();
 
 	glutDisplayFunc(display);
-	glutKeyboardFunc(keyboard);
-	glutSpecialFunc(arrow_keys);
+	glutKeyboardFunc(keyboardDown);
+	glutKeyboardUpFunc(keyboardUp);
+	glutSpecialFunc(specialDown);
+	glutSpecialUpFunc(specialUp);
 	glutIdleFunc(display);
 	glutMainLoop();
 	return 0;
