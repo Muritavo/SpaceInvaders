@@ -8,14 +8,16 @@ using namespace std;
 #include <fstream>
 #include <vector>
 #include <time.h>
+#include <math.h>
 
 const int
 	BEZIER_SECTIONS = 10,			  //Número de seções da curva para estimar a distância percorrida
 	MAX_PROJECTILES = 100,			  //Número maximo de projéteis
 	WIDTH = 200,					  //Largura do espaço
 	HEIGHT = 200,					  //Altura do espaço
-	SHIP_SPEED = 5,					  //Velocidade da nave/s
-	PROJECTILE_SPEED = 1,			  //Velocidade da nave/s
+	SHIP_SPEED = 200,				  //Velocidade da nave/s
+	SHIP_ROTATION = 360,				  //Graus de rotação/s
+	PROJECTILE_SPEED = SHIP_SPEED * 2,			  //Velocidade da nave/s
 	INTERVAL_BETWEEN_ENEMY_SHOTS = 5; //Intervalo em segundos entre os tiros dos inimigos
 
 struct Projectile
@@ -46,7 +48,8 @@ struct ShipInstance
 	GLfloat from[2];
 	GLfloat to[2];
 	GLfloat intermediate[2];
-	GLfloat distance;
+	GLfloat timeToTravel;
+	GLfloat timeTraveled;
 };
 
 vector<float> colors;
@@ -63,6 +66,17 @@ Ship playerShip = {
 	.offsetX = 1.5,
 	.offsetY = 2.5};
 vector<ShipInstance> instances;
+
+int lastClock = 0;
+double elapsedSeconds;
+
+void updateTick()
+{
+	int currentClock = glutGet(GLUT_ELAPSED_TIME);
+	elapsedSeconds = (currentClock - lastClock) / 1000.0f;
+	lastClock = currentClock;
+	Sleep(1000.0f / 60.0f);
+}
 
 void getRandomPoint(float *points)
 {
@@ -95,7 +109,7 @@ void bezier(float t, float *p0, float *p1, float *p2, int pointsSize)
 {
 	multiplyMatrix((1.0f - t) * (1.0f - t), p0, pointsSize);
 	multiplyMatrix(2.0f * (1.0f - t) * t, p1, pointsSize);
-	//multiplyMatrix(t * t, p2, pointsSize);
+	multiplyMatrix(t * t, p2, pointsSize);
 
 	sumMatrix(p0, p1, pointsSize);
 	sumMatrix(p0, p2, pointsSize);
@@ -295,8 +309,8 @@ void updateProjectilesPosition()
 			if (instances[ii].projectilePointer[pi] != nullptr)
 			{
 				Projectile *p = instances[ii].projectilePointer[pi];
-				p->position[0] += p->directionVector[0];
-				p->position[1] += p->directionVector[1];
+				p->position[0] += (p->directionVector[0] * elapsedSeconds);
+				p->position[1] += (p->directionVector[1] * elapsedSeconds);
 				if ((p->position[0] > WIDTH || p->position[0] < 0) || (p->position[1] > HEIGHT || p->position[1] < 0))
 				{
 					instances[ii].projectilePointer[pi] = nullptr;
@@ -311,6 +325,7 @@ void updateEnemiesPosition()
 	for (int ii = 1; ii < instances.size(); ii++)
 	{
 		ShipInstance *s = &instances[ii];
+		s->rotation = atan2(instances[0].position[1] - s->position[1], instances[0].position[0] - s->position[0]) * 180 / M_PI - 90;
 		//Gera um novo destino quando a nave inimiga chegar ao destino
 		if (s->position[0] == s->to[0] && s->position[1] == s->to[1])
 		{
@@ -318,8 +333,9 @@ void updateEnemiesPosition()
 			s->from[1] = s->position[1];
 			getRandomPoint(s->intermediate);
 			getRandomPoint(s->to);
-			s->distance = 0;
+
 			//Estima a distância a ser percorrida
+			float distance = 0;
 			GLfloat prevPoint[] = {*(s->position + 0), *(s->position + 1)};
 			GLfloat to[] = {*(s->to + 0), *(s->to + 1)};
 			GLfloat intermediate[] = {*(s->intermediate + 0), *(s->intermediate + 1)};
@@ -327,41 +343,32 @@ void updateEnemiesPosition()
 			{
 				GLfloat nextPoint[] = {*(s->from + 0), *(s->from + 1)};
 				bezier(normalize(si, BEZIER_SECTIONS - 1, 0), nextPoint, intermediate, to, 2);
-				s->distance += sqrt(pow(*(&prevPoint + 0) - *(&nextPoint + 0), 2) + pow(*(&prevPoint + 1) - *(&nextPoint + 1), 2));
+				distance += sqrt(pow(nextPoint[0] - prevPoint[0], 2) + pow(nextPoint[1] - prevPoint[1], 2));
 				prevPoint[0] = nextPoint[0];
 				prevPoint[1] = nextPoint[1];
 			}
-		} else {
-			s->position[0] = s->to[0];
-			s->position[1] = s->to[1];
+			s->timeToTravel = distance / SHIP_SPEED;
+			s->timeTraveled = 0;
+		}
+		else
+		{
+			s->timeTraveled += elapsedSeconds;
+			GLfloat to[] = {*(s->to + 0), *(s->to + 1)};
+			GLfloat intermediate[] = {*(s->intermediate + 0), *(s->intermediate + 1)};
+			GLfloat nextPoint[] = {*(s->from + 0), *(s->from + 1)};
+			if (s->timeTraveled >= s->timeToTravel)
+			{
+				s->position[0] = s->to[0];
+				s->position[1] = s->to[1];
+			}
+			else
+			{
+				bezier(normalize(s->timeTraveled, s->timeToTravel, 0), nextPoint, intermediate, to, 2);
+				s->position[0] = nextPoint[0];
+				s->position[1] = nextPoint[1];
+			}
 		}
 	}
-}
-
-// **********************************************************************
-//  void display( void )
-//
-//
-// **********************************************************************
-void display(void)
-{
-	updateProjectilesPosition();
-	updateEnemiesPosition();
-	glClear(GL_COLOR_BUFFER_BIT);
-	//Define os limites
-	glMatrixMode(GL_MODELVIEW);
-	glLoadIdentity();
-	glOrtho(0, WIDTH, 0, HEIGHT, 0, HEIGHT);
-	glEnable(GL_BLEND);
-	glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-
-	for (int ii = 0; ii < instances.size(); ii++)
-	{
-		drawShip(instances[ii]);
-	}
-
-	glDisable(GL_BLEND);
-	glutSwapBuffers();
 }
 
 void shotProjectile(ShipInstance *s)
@@ -371,11 +378,18 @@ void shotProjectile(ShipInstance *s)
 	pointer->position[0] = s->position[0];
 	pointer->position[1] = s->position[1];
 	pointer->directionVector[0] = PROJECTILE_SPEED * -sin(s->rotation * 3.14f / 180.0f);
-	pointer->directionVector[1] = PROJECTILE_SPEED * cos(s->rotation * 3.14f / 180.0f);
+ 	pointer->directionVector[1] = PROJECTILE_SPEED * cos(s->rotation * 3.14f / 180.0f);
 	pointer->size = 1;
 	s->lastProjectileIndex++;
 	if (s->lastProjectileIndex == MAX_PROJECTILES)
 		s->lastProjectileIndex = 0;
+}
+
+void updateEnemiesState() {
+	for (int ii = 1; ii < instances.size(); ii++)
+	{
+		shotProjectile(&instances[ii]);
+	}
 }
 
 // **********************************************************************
@@ -412,22 +426,56 @@ void arrow_keys(int a_keys, int x, int y)
 	{
 	case GLUT_KEY_UP: // When Up Arrow Is Pressed...
 	case GLUT_KEY_DOWN:
-		newPosition[0] = instances[0].position[0] + SHIP_SPEED * -sin(instances[0].rotation * 3.14f / 180.0f) * direct;
-		newPosition[1] = instances[0].position[1] + SHIP_SPEED * cos(instances[0].rotation * 3.14f / 180.0f) * direct;
+		newPosition[0] = instances[0].position[0] + (SHIP_SPEED * elapsedSeconds) * -sin(instances[0].rotation * 3.14f / 180.0f) * direct;
+		newPosition[1] = instances[0].position[1] + (SHIP_SPEED * elapsedSeconds) * cos(instances[0].rotation * 3.14f / 180.0f) * direct;
 		if (newPosition[0] > 0 && newPosition[0] < WIDTH)
 			instances[0].position[0] = newPosition[0];
+		else
+			instances[0].position[0] = newPosition[0] > 0 ? WIDTH : 0;
+
 		if (newPosition[1] > 0 && newPosition[1] < HEIGHT)
 			instances[0].position[1] = newPosition[1];
+		else
+			instances[0].position[1] = newPosition[1] > 0 ? HEIGHT : 0;
+
 		break;
 	case GLUT_KEY_RIGHT:
-		instances[0].rotation -= 3;
+		instances[0].rotation -= SHIP_ROTATION * elapsedSeconds;
 		break;
 	case GLUT_KEY_LEFT:
-		instances[0].rotation += 3;
+		instances[0].rotation += SHIP_ROTATION * elapsedSeconds;
 		break;
 	default:
 		break;
 	}
+}
+
+// **********************************************************************
+//  void display( void )
+//
+//
+// **********************************************************************
+void display(void)
+{
+	updateProjectilesPosition();
+	updateEnemiesPosition();
+	updateEnemiesState();
+	glClear(GL_COLOR_BUFFER_BIT);
+	//Define os limites
+	glMatrixMode(GL_MODELVIEW);
+	glLoadIdentity();
+	glOrtho(0, WIDTH, 0, HEIGHT, 0, HEIGHT);
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+
+	for (int ii = 0; ii < instances.size(); ii++)
+	{
+		drawShip(instances[ii]);
+	}
+
+	glDisable(GL_BLEND);
+	glutSwapBuffers();
+	updateTick();
 }
 
 // **********************************************************************
@@ -439,7 +487,6 @@ int main(int argc, char **argv)
 {
 	glutInit(&argc, argv);
 	glutInitDisplayMode(GLUT_DOUBLE | GLUT_DEPTH | GLUT_RGB); // | GLUT_STEREO);// | GLUT_DOUBLE | GLUT_RGBA );
-	//glutInitDisplayMode (GLUT_RGB | GLUT_DEPTH | GLUT_STEREO);// | GLUT_DOUBLE | GLUT_RGBA );
 
 	glutInitWindowPosition(0, 0);
 	glutInitWindowSize(800, 800);
